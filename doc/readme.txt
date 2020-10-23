@@ -1,0 +1,1 @@
+This folder should contain documentation of the BATMODEL prototype developed at SLU
