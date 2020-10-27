@@ -9,3 +9,14 @@ gams/batmodel.SLU011985.torbjan.pui
 # Ignore list files of GAMS and BAK (backup) files of the editor
 *.LST
 *.BAK
+*.log
+*.lxi
+*.~gm
+*.dat
+
+
+# Ignore all gdx-files-files*
+*.gdx
+
+# Ignore MS word backup files
+~$*.docx

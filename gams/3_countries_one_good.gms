@@ -96,8 +96,9 @@ china.usa.qTrd.beef  20
 ;
 
 
-parameter p_tc(reg,reg1) "Unit trade costs for import of reg from reg1";
-p_tc(reg,reg1) = 1;
+* Invent unit trade costs for import of reg from reg1
+p_tradeData(reg,reg1,"tc",comm,"raw") $ [not sameas(reg,reg1)] = 1;
+
 
 parameter p_report(regtot,regtot,cols,rows,datatype);
 
@@ -131,6 +132,7 @@ variable v_armImpPriceIndex(reg,comm) "Price index of import utility aggregate";
 
 variable v_pProd(reg,comm) "Producer price";
 variable v_pFob(reg,comm) "Export price (free-on-board) including consumer price margin";
+variable v_pCif(reg,reg1,comm) "Import price";
 variable v_pConsDom(reg,comm) "Consumer price of domestically produced good";
 
 positive variables v_qDom,v_qImp, v_pConsDom;
@@ -148,6 +150,7 @@ equation e_supBalance(reg,comm) "Supply balance";
 equation e_qSup(reg,comm) "Supply function";
 
 equation e_pFob(reg,comm) "Export price definition";
+equation e_pCif(reg,reg1,comm) "Import price";
 equation e_pConsDom(reg,comm) "Relating the consumer price of domestic good to domestic producer price";
 
 
@@ -242,6 +245,9 @@ e_pFob(reg,comm) $ p_marketData(reg,"qdem",comm,"cal") ..
     v_pFob(reg,comm)
         =E= v_pProd(reg,comm) + p_marketData(reg,"ppMrg",comm,"sim");
 
+e_pCif(reg,reg1,comm) $ p_tradeData(reg,reg1,"qTrd",comm,"cal") ..
+    v_pCif(reg,reg1,comm) =E= v_pFob(reg,comm) + p_tradeData(reg,reg1,"tc",comm,"sim");
+
 
 model m_trade "Model of trade" /e_armSharesTop
 *                                e_armAggImp
@@ -251,7 +257,8 @@ model m_trade "Model of trade" /e_armSharesTop
                                 e_supBalance
                                 e_qSup
                                 e_pConsDom
-                                e_pFob/;
+                                e_pFob
+                                e_pCif/;
 
 
 
@@ -288,42 +295,35 @@ p_marketData(reg,"ppmrg",comm,"cal")
 p_tradeData(reg,reg1,cols,rows,"cal") = p_tradeData(reg,reg1,cols,rows,"raw");
 
 
+*   - Assume that the producer price margin is identical for exports as for domestic market?
+p_marketData(reg,"pFob",comm,"cal") $ p_marketData(reg,"qExp",comm,"cal")
+    = p_marketData(reg,"pProd",comm,"cal") + p_marketData(reg,"ppmrg",comm,"cal");
+
+
 * --- Create FOB and CIF prices where there is trade
 p_tradeData(reg,reg1,"pCif",comm,"cal") $ p_tradeData(reg,reg1,"qTrd",comm,"cal")
-    = p_tradeData(reg,reg1,"pFob",comm,"cal")
-    + p_tradeData(reg,reg1,"tc",comm,"cal");
-
-
-*   - Assume that the producer price margin is identical for exports as for domestic market?
-p_tradeData(reg,reg1,"pFob",comm,"cal") $ p_tradeData(reg,reg1,"qTrd",comm,"cal")
-    = p_marketData(reg1,"pProd",comm,"cal") + p_marketData(reg1,"ppmrg",comm,"cal");
-
-
-p_tradeData(reg,"pCif",comm,"cal")
     = p_marketData(reg,"pFob",comm,"cal")
-    + p_tradeData(reg,"tc",comm,"cal");
+    + p_tradeData(reg,reg1,"tc",comm,"cal");
 
 
 p_marketData(reg,"pConsImp",comm,"cal") = p_marketData(reg,"pConsDom",comm,"cal");
 
 
-* --- The average consumer price exhausts the budget
-
-p_marketData(reg,"pConsDem",comm,"cal")
-    = (  p_marketData(reg,"pConsDom",comm,"cal")*p_marketData(reg,"qdom",comm,"cal")
-       + p_marketData(reg,"pConsImp",comm,"cal")*p_marketData(reg,"qimp",comm,"cal"))
-      / p_marketData(reg,"qimp",comm,"cal");
-
-
-
-
-
 *   - Define price index of imports to equal average import price in balanced point
-p_marketData(reg,"pImpAgg",comm,"cal")
+p_marketData(reg,"pConsImp",comm,"cal")
     = sum(reg1 $ p_tradeData(reg,reg1,"qTrd",comm,"cal"),
             p_tradeData(reg,reg1,"qTrd",comm,"cal")
            *p_tradeData(reg,reg1,"pCif",comm,"cal"))
-    / p_marketData(reg,"qImp",comm,"cal");
+    / p_marketData(reg,"qimp",comm,"cal");
+
+
+* --- The average consumer price exhausts the budget
+p_marketData(reg,"pConsDem",comm,"cal")
+    = (  p_marketData(reg,"pConsDom",comm,"cal")*p_marketData(reg,"qdom",comm,"cal")
+       + p_marketData(reg,"pConsImp",comm,"cal")*p_marketData(reg,"qimp",comm,"cal"))
+      / p_marketData(reg,"qDem",comm,"cal");
+
+
 
 
 *-------------------------------------------------------------------------------
@@ -425,15 +425,6 @@ problemData(reg,"na","qExp",comm,"cal")
 $batinclude "assert_that_set_is_empty.gms" problemData "Sum of trade flows do not match aggregate trade balance" %ERROR_FILE%
 
 
-* --- The price index of the import aggregate shall be the average import price
-*
-problemData(reg,"na","pImpAgg",comm,"cal")
-    $ [p_marketData(reg,"pImpAgg",comm,"cal") ne p_marketData(reg,"pConsImp",comm,"cal")] = yes;
-
-$batinclude "assert_that_set_is_empty.gms" problemData "Price index of imports does not match average import price." %ERROR_FILE%
-
-
-
 
 *-------------------------------------------------------------------------------
 * Calibration of behavioural functions
@@ -523,6 +514,7 @@ v_qDom.L(reg,comm) $ p_marketData(reg,"qDem",comm,"cal") = p_marketData(reg,"qDo
 v_qSup.L(reg,comm) $ p_marketData(reg,"qDem",comm,"cal") = p_marketData(reg,"qSup",comm,"cal");
 
 
+
 *-------------------------------------------------------------------------------
 * TESTS for successful calibration
 * "Only code if there is a failing test"
@@ -562,6 +554,7 @@ $batinclude "assert_that_set_is_empty.gms" problemData "Armington import share p
 
 p_marketData(reg,"uDem",comm,"sim") = p_marketData(reg,"uDem",comm,"cal")*1.0;
 p_marketData(reg,"ppMrg",comm,"sim") = p_marketData(reg,"ppMrg",comm,"cal")*1.0;
+p_tradeData(reg,reg1,"tc",comm,"sim") = p_tradeData(reg,reg1,"tc",comm,"cal")*1.0;
 solve m_trade using cns;
 
 
@@ -594,10 +587,25 @@ p_problemDiff(reg,"na","uImp",comm,"cal")
 p_problemDiff(reg,"na","pImpAgg",comm,"cal")
     = v_armImpPriceIndex.L(reg,comm) - p_marketData(reg,"pImpAgg",comm,"cal");
 
+*   - Price index of imports match calibrated value
+p_problemDiff(reg,reg1,"pCif",comm,"cal") $ p_tradeData(reg,reg1,"pCif",comm,"cal")
+    = v_pCif.L(reg,reg1,comm) - p_tradeData(reg,reg1,"pCif",comm,"cal");
+
+
 problemData(reg,regtot,cols,comm,"cal")
     $ [abs(p_problemDiff(reg,regtot,cols,comm,"cal")) gt p_problemTol] = yes;
 
 $batinclude "assert_that_set_is_empty.gms" problemData "Some price or quantity is not calibrating correctly" %ERROR_FILE%
+
+
+
+* --- The price index of the import aggregate shall be the average import price
+*
+*problemData(reg,"na","pImpAgg",comm,"cal")
+*    $ [p_marketData(reg,"pImpAgg",comm,"cal") ne p_marketData(reg,"pConsImp",comm,"cal")] = yes;
+
+*$batinclude "assert_that_set_is_empty.gms" problemData "Price index of imports does not match average import price." %ERROR_FILE%
+
 
 
 *-------------------------------------------------------------------------------
@@ -618,6 +626,7 @@ colsToCheck("pConsDom") = yes;
 
 p_marketData(reg,"uDem",comm,"sim") = p_marketData(reg,"uDem",comm,"cal")*1.1;
 p_marketData(reg,"ppMrg",comm,"sim") = p_marketData(reg,"ppMrg",comm,"cal")*1.0;
+p_tradeData(reg,reg1,"tc",comm,"sim")=p_tradeData(reg,reg1,"tc",comm,"cal")
 solve m_trade using cns;
 
 *   - Total supply should increase in all regions vs calibration
@@ -636,9 +645,13 @@ p_problemDiff(reg,"na","pConsDom",comm,"sim")
 p_problemDiff(reg,"na","pFob",comm,"sim")
     = v_pFob.L(reg,comm) - p_marketData(reg,"pFob",comm,"cal");
 
-*   - The import price (pCif) should increase in all regions vs calibration
-p_problemDiff(reg,"na","pFob",comm,"sim")
-    = v_pFob.L(reg,comm) - p_marketData(reg,"pFob",comm,"cal");
+*   - The import price index should increase in all regions vs calibration
+p_problemDiff(reg,"na","pImpAgg",comm,"sim")
+    = v_armImpPriceIndex.L(reg,comm) - p_marketData(reg,"pImpAgg",comm,"cal");
+
+*   - The import prices should increase in all import flows vs calibration
+p_problemDiff(reg,reg1,"pImpAgg",comm,"sim") $ p_tradeData(reg,reg1,"qTrd",comm,"cal")
+    = v_pCif.L(reg,reg1,comm) - p_tradeData(reg,reg1,"pCif",comm,"cal");
 
 
 problemData(reg,"na",colsToCheck,comm,"sim")
@@ -647,3 +660,5 @@ problemData(reg,"na",colsToCheck,comm,"sim")
 
 
 $batinclude "assert_that_set_is_empty.gms" problemData "Behavioural problem: increased demand does not provoke increased supply." %ERROR_FILE%
+
+execute_unload "%results_out%\results.gdx";
